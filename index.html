@@ -362,7 +362,8 @@
     setTimeout(fitClock, 0);
   };
 
-  hideBtn.onclick = () => {
+  hideBtn.onclick = (e) => {
+    e.stopPropagation();
     state.uiHidden = true;
     document.body.classList.add("hiddenUI");
   };

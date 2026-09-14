@@ -362,14 +362,29 @@
     setTimeout(fitClock, 0);
   };
 
-  hideBtn.onclick = (e) => {
+  let revealEnabled = true;
+
+  hideBtn.addEventListener("pointerup", (e) => {
+    e.preventDefault();
     e.stopPropagation();
+
+    revealEnabled = false;
     state.uiHidden = true;
     document.body.classList.add("hiddenUI");
-  };
 
-  document.body.addEventListener("click", (e) => {
-    if (state.uiHidden && !alarmOverlay.classList.contains("open")) {
+    // Sur certains Android, le même toucher peut générer un clic synthétique
+    // juste après le pointerup. On l'ignore brièvement.
+    setTimeout(() => {
+      revealEnabled = true;
+    }, 450);
+  });
+
+  document.body.addEventListener("pointerup", (e) => {
+    if (
+      state.uiHidden &&
+      revealEnabled &&
+      !alarmOverlay.classList.contains("open")
+    ) {
       state.uiHidden = false;
       document.body.classList.remove("hiddenUI");
     }

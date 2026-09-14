@@ -275,6 +275,17 @@
         <input type="text" id="alarmLabel" placeholder="Nom de l’alarme (facultatif)" />
       </div>
       <div class="row">
+        <select id="alarmSound" aria-label="Son de l’alarme">
+          <option value="classic">Son : Bip classique</option>
+          <option value="double">Son : Double bip</option>
+          <option value="gentle">Son : Réveil doux</option>
+          <option value="rapid">Son : Sonnerie rapide</option>
+          <option value="strong">Son : Alerte forte</option>
+          <option value="chime">Son : Carillon</option>
+        </select>
+        <button class="actionBtn" id="testSoundBtn">▶ Tester le son</button>
+      </div>
+      <div class="row">
         <label><input type="checkbox" id="repeatDaily" /> Tous les jours</label>
       </div>
       <div class="row">
@@ -330,6 +341,7 @@
     uiHidden: false,
     audioCtx: null,
     toneTimer: null,
+    previewingSound: false,
     lastCheck: Date.now()
   };
 
@@ -492,7 +504,7 @@
           <div class="alarmMain">
             <div>
               <div class="alarmTime">${a.time}</div>
-              <div class="alarmLabel">${escapeHtml(a.label || "Alarme")} ${a.repeatDaily ? "• Tous les jours" : ""}</div>
+              <div class="alarmLabel">${escapeHtml(a.label || "Alarme")} ${a.repeatDaily ? "• Tous les jours" : ""} • ${soundName(a.sound || "classic")}</div>
             </div>
             <label><input type="checkbox" ${a.enabled ? "checked" : ""} data-toggle="${a.id}"> Active</label>
           </div>
@@ -502,6 +514,17 @@
         `;
         alarmList.appendChild(d);
       });
+  }
+
+  function soundName(sound){
+    return {
+      classic:"Bip classique",
+      double:"Double bip",
+      gentle:"Réveil doux",
+      rapid:"Sonnerie rapide",
+      strong:"Alerte forte",
+      chime:"Carillon"
+    }[sound] || "Bip classique";
   }
 
   function escapeHtml(s){
@@ -523,6 +546,17 @@
     renderAlarms();
   });
 
+  $("#testSoundBtn").onclick = async () => {
+    await enableAudio();
+    stopTone();
+    state.previewingSound = true;
+    playTone($("#alarmSound").value);
+    setTimeout(() => {
+      state.previewingSound = false;
+      stopTone();
+    }, 2200);
+  };
+
   $("#addAlarmBtn").onclick = async () => {
     const time = $("#alarmTime").value;
     if (!time) return alert("Choisis une heure.");
@@ -531,6 +565,7 @@
       id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random())),
       time,
       label: $("#alarmLabel").value.trim(),
+      sound: $("#alarmSound").value,
       repeatDaily: $("#repeatDaily").checked,
       enabled: true,
       lastTriggeredDate: null
@@ -547,28 +582,74 @@
     }catch{}
   }
 
-  function playTone(){
+  function beepTone(freq=880, duration=0.45, volume=0.28, type="sine", delay=0){
+    if (!state.audioCtx) return;
+    const start = state.audioCtx.currentTime + delay;
+    const osc = state.audioCtx.createOscillator();
+    const gain = state.audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    osc.connect(gain).connect(state.audioCtx.destination);
+    osc.start(start);
+    osc.stop(start + duration + 0.05);
+  }
+
+  function soundPattern(sound){
+    switch(sound){
+      case "double":
+        beepTone(900,.22,.28,"sine",0);
+        beepTone(900,.22,.28,"sine",.32);
+        return 950;
+      case "gentle":
+        beepTone(520,.55,.18,"sine",0);
+        beepTone(660,.55,.16,"sine",.6);
+        return 1600;
+      case "rapid":
+        beepTone(1000,.12,.24,"square",0);
+        beepTone(1000,.12,.24,"square",.18);
+        beepTone(1000,.12,.24,"square",.36);
+        return 900;
+      case "strong":
+        beepTone(880,.38,.36,"square",0);
+        beepTone(1175,.38,.34,"square",.45);
+        return 1050;
+      case "chime":
+        beepTone(523.25,.45,.18,"sine",0);
+        beepTone(659.25,.45,.18,"sine",.28);
+        beepTone(783.99,.65,.20,"sine",.56);
+        return 1800;
+      case "classic":
+      default:
+        beepTone(880,.65,.32,"sine",0);
+        return 1100;
+    }
+  }
+
+  function playTone(sound){
     stopTone();
     enableAudio();
     if (!state.audioCtx) return;
-    const beep = () => {
-      if (!alarmOverlay.classList.contains("open")) return;
-      try{
-        const osc = state.audioCtx.createOscillator();
-        const gain = state.audioCtx.createGain();
-        osc.type = "sine";
-        osc.frequency.value = 880;
-        gain.gain.setValueAtTime(0.0001, state.audioCtx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.32, state.audioCtx.currentTime + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, state.audioCtx.currentTime + 0.65);
-        osc.connect(gain).connect(state.audioCtx.destination);
-        osc.start();
-        osc.stop(state.audioCtx.currentTime + 0.7);
-      }catch{}
+    const chosen = sound || "classic";
+    const play = () => {
+      if (!alarmOverlay.classList.contains("open") && !state.previewingSound) return;
+      soundPattern(chosen);
     };
-    beep();
-    state.toneTimer = setInterval(beep, 1100);
-    if ("vibrate" in navigator) navigator.vibrate([700,300,700,300,700]);
+    play();
+    if (!state.previewingSound) {
+      const interval = {
+        double:950,
+        gentle:1600,
+        rapid:900,
+        strong:1050,
+        chime:1800,
+        classic:1100
+      }[chosen] || 1100;
+      state.toneTimer = setInterval(play, interval);
+      if ("vibrate" in navigator) navigator.vibrate([700,300,700,300,700]);
+    }
   }
 
   function stopTone(){
@@ -583,7 +664,7 @@
     ringLabel.textContent = alarm.label || "Alarme";
     alarmOverlay.classList.add("open");
     alarmPanel.classList.remove("open");
-    playTone();
+    playTone(alarm.sound || "classic");
   }
 
   $("#stopBtn").onclick = () => {
@@ -606,6 +687,7 @@
       id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random())),
       time,
       label: (original?.label || "Alarme") + " (rappel)",
+      sound: original?.sound || "classic",
       repeatDaily:false,
       enabled:true,
       lastTriggeredDate:null,

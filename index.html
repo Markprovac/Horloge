@@ -63,6 +63,13 @@
     #clock.font-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;font-weight:700}
     #clock.font-serif{font-family:Georgia,"Times New Roman",serif;font-weight:700;letter-spacing:-0.05em}
     #clock.font-thin{font-family:Arial,Helvetica,sans-serif;font-weight:300;letter-spacing:-0.03em}
+    #clock .blinkColon{
+      display:inline-block;
+      opacity:1;
+    }
+    #clock .blinkColon.off{
+      opacity:0;
+    }
     #topbar{
       position:fixed;
       top:var(--safe-top);
@@ -267,7 +274,7 @@
       <button class="actionBtn" id="hideBtn">Masquer les commandes</button>
     </div>
     <div id="wakeState">Écran maintenu allumé si le navigateur l’autorise.</div>
-    <div id="appVersion" style="text-align:center;color:#666;font-size:11px">v1.7</div>
+    <div id="appVersion" style="text-align:center;color:#666;font-size:11px">v1.8</div>
   </div>
 
   <div class="panel" id="alarmPanel">
@@ -387,10 +394,16 @@
 
   function updateClock(){
     const now = new Date();
-    const opts = state.showSeconds
-      ? {hour:"2-digit", minute:"2-digit", second:"2-digit", hour12:false}
-      : {hour:"2-digit", minute:"2-digit", hour12:false};
-    clock.textContent = now.toLocaleTimeString("fr-FR", opts);
+    /* Compatible avec l'ancien Safari de l'iPad 2 (sans String.padStart). */
+    const hours = ("0" + now.getHours()).slice(-2);
+    const minutes = ("0" + now.getMinutes()).slice(-2);
+    const seconds = ("0" + now.getSeconds()).slice(-2);
+    const colonClass = now.getSeconds() % 2 === 0 ? "blinkColon" : "blinkColon off";
+
+    clock.innerHTML = hours + '<span class="' + colonClass + '">:</span>' + minutes +
+      (state.showSeconds ? ":" + seconds : "");
+    clock.setAttribute("aria-label", hours + " heures " + minutes +
+      (state.showSeconds ? " minutes " + seconds + " secondes" : " minutes"));
   }
 
   function renderPalette(){

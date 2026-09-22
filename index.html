@@ -267,7 +267,7 @@
       <button class="actionBtn" id="hideBtn">Masquer les commandes</button>
     </div>
     <div id="wakeState">Écran maintenu allumé si le navigateur l’autorise.</div>
-    <div id="appVersion" style="text-align:center;color:#666;font-size:11px">v1.6</div>
+    <div id="appVersion" style="text-align:center;color:#666;font-size:11px">v1.7</div>
   </div>
 
   <div class="panel" id="alarmPanel">
@@ -459,12 +459,38 @@
     }
   });
 
-  fullscreenBtn.onclick = async () => {
+  let fullscreenBusy = false;
+
+  function currentFullscreenElement(){
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  fullscreenBtn.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    /* Certains Android génèrent deux clics tactiles successifs. */
+    if (fullscreenBusy) return;
+    fullscreenBusy = true;
+    fullscreenBtn.disabled = true;
+
     try {
-      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
-      else await document.exitFullscreen();
+      if (!currentFullscreenElement()) {
+        const enter = document.documentElement.requestFullscreen ||
+                      document.documentElement.webkitRequestFullscreen;
+        if (enter) await enter.call(document.documentElement);
+      } else {
+        const leave = document.exitFullscreen || document.webkitExitFullscreen;
+        if (leave) await leave.call(document);
+      }
     } catch {}
-  };
+
+    /* Le verrou reste actif assez longtemps pour absorber le clic parasite. */
+    setTimeout(() => {
+      fullscreenBusy = false;
+      fullscreenBtn.disabled = false;
+    }, 1200);
+  });
 
   async function requestWakeLock(){
     if (!("wakeLock" in navigator)) {

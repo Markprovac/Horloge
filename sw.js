@@ -1,4 +1,4 @@
-const CACHE = "horloge-pwa-v1.6";
+const CACHE = "horloge-pwa-v1.7";
 const STATIC_ASSETS = [
   "./manifest.json",
   "./icon-192.svg",

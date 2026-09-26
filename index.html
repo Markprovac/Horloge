@@ -274,7 +274,7 @@
       <button class="actionBtn" id="hideBtn">Masquer les commandes</button>
     </div>
     <div id="wakeState">Écran maintenu allumé si le navigateur l’autorise.</div>
-    <div id="appVersion" style="text-align:center;color:#666;font-size:11px">v1.8</div>
+    <div id="appVersion" style="text-align:center;color:#666;font-size:11px">v1.9</div>
   </div>
 
   <div class="panel" id="alarmPanel">
@@ -733,8 +733,9 @@
     state.alarms.push({
       id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random())),
       time,
-      label: (original?.label || "Alarme") + " (rappel)",
-      sound: original?.sound || "classic",
+      /* Pas de ?. : cette syntaxe bloque entièrement Safari ancien. */
+      label: ((original && original.label) || "Alarme") + " (rappel)",
+      sound: (original && original.sound) || "classic",
       repeatDaily:false,
       enabled:true,
       lastTriggeredDate:null,

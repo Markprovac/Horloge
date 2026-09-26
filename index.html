@@ -274,7 +274,7 @@
       <button class="actionBtn" id="hideBtn">Masquer les commandes</button>
     </div>
     <div id="wakeState">Écran maintenu allumé si le navigateur l’autorise.</div>
-    <div id="appVersion" style="text-align:center;color:#666;font-size:11px">v1.9</div>
+    <div id="appVersion" style="text-align:center;color:#666;font-size:11px">v2.0</div>
   </div>
 
   <div class="panel" id="alarmPanel">
@@ -320,7 +320,7 @@
     </div>
   </div>
 
-<script>
+<script type="application/x-disabled">
 (() => {
   const $ = (s) => document.querySelector(s);
   const clock = $("#clock");
@@ -781,6 +781,402 @@
     window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
   }
 })();
+</script>
+<script>
+(function () {
+  "use strict";
+
+  function $(selector) { return document.querySelector(selector); }
+  function on(element, eventName, handler) {
+    if (element) element.addEventListener(eventName, handler, false);
+  }
+  function hasClass(element, name) {
+    return (" " + element.className + " ").indexOf(" " + name + " ") !== -1;
+  }
+  function addClass(element, name) {
+    if (!hasClass(element, name)) element.className += (element.className ? " " : "") + name;
+  }
+  function removeClass(element, name) {
+    element.className = (" " + element.className + " ").replace(" " + name + " ", " ").replace(/^\s+|\s+$/g, "");
+  }
+  function setClockColor(color) {
+    document.documentElement.style.setProperty("--clock-color", color);
+    clock.style.color = color;
+  }
+  function newId() {
+    return String(new Date().getTime()) + "-" + String(Math.random()).slice(2);
+  }
+
+  var clock = $("#clock");
+  var palette = $("#palette");
+  var secondsBtn = $("#secondsBtn");
+  var hideBtn = $("#hideBtn");
+  var fullscreenBtn = $("#fullscreenBtn");
+  var wakeState = $("#wakeState");
+  var alarmPanel = $("#alarmPanel");
+  var alarmList = $("#alarmList");
+  var alarmOverlay = $("#alarmOverlay");
+  var ringTime = $("#ringTime");
+  var ringLabel = $("#ringLabel");
+  var colors = ["#ffffff", "#ff3b30", "#ff9500", "#ffd60a", "#34c759", "#00e5ff", "#0a84ff", "#bf5af2", "#ff2d55"];
+  var storedAlarms = [];
+
+  try { storedAlarms = JSON.parse(localStorage.getItem("alarms") || "[]"); } catch (ignore) { storedAlarms = []; }
+
+  var state = {
+    color: localStorage.getItem("clockColor") || "#ffffff",
+    showSeconds: localStorage.getItem("showSeconds") !== "false",
+    fontStyle: localStorage.getItem("fontStyle") || "system",
+    clockSize: localStorage.getItem("clockSize") || "large",
+    alarms: storedAlarms,
+    activeAlarm: null,
+    wakeLock: null,
+    uiHidden: false,
+    audioCtx: null,
+    toneTimer: null,
+    previewingSound: false
+  };
+
+  function fitClock() {
+    var wrap = $("#clockWrap");
+    var factors = { small: 0.72, medium: 0.88, large: 1, xlarge: 1.18 };
+    var sizeFactor = factors[state.clockSize] || 1;
+    var viewportW = document.documentElement.clientWidth || window.innerWidth || 320;
+    var viewportH = document.documentElement.clientHeight || window.innerHeight || 480;
+    var maxW = Math.max(120, (wrap.clientWidth || viewportW) - 8);
+    var maxH = Math.max(60, viewportH * 0.72);
+    var size = Math.max(44, viewportW * 0.34 * sizeFactor);
+    var guard = 0;
+    clock.style.fontSize = size + "px";
+    while ((clock.scrollWidth > maxW || clock.offsetHeight > maxH) && size > 24 && guard < 240) {
+      size -= 2;
+      clock.style.fontSize = size + "px";
+      guard += 1;
+    }
+  }
+
+  function applyClockStyle() {
+    clock.className = "font-" + state.fontStyle;
+    $("#fontStyle").value = state.fontStyle;
+    $("#clockSize").value = state.clockSize;
+    window.setTimeout(fitClock, 0);
+  }
+
+  function updateClock() {
+    var now = new Date();
+    var hours = ("0" + now.getHours()).slice(-2);
+    var minutes = ("0" + now.getMinutes()).slice(-2);
+    var seconds = ("0" + now.getSeconds()).slice(-2);
+    var colonClass = now.getSeconds() % 2 === 0 ? "blinkColon" : "blinkColon off";
+    clock.innerHTML = hours + '<span class="' + colonClass + '">:</span>' + minutes + (state.showSeconds ? ":" + seconds : "");
+  }
+
+  function renderPalette() {
+    var i;
+    palette.innerHTML = "";
+    for (i = 0; i < colors.length; i += 1) {
+      (function (color) {
+        var button = document.createElement("button");
+        button.className = "colorBtn" + (color.toLowerCase() === state.color.toLowerCase() ? " active" : "");
+        button.style.background = color;
+        button.setAttribute("aria-label", "Couleur " + color);
+        button.onclick = function () {
+          state.color = color;
+          localStorage.setItem("clockColor", color);
+          setClockColor(color);
+          renderPalette();
+        };
+        palette.appendChild(button);
+      }(colors[i]));
+    }
+    setClockColor(state.color);
+  }
+
+  secondsBtn.onclick = function () {
+    state.showSeconds = !state.showSeconds;
+    localStorage.setItem("showSeconds", state.showSeconds);
+    secondsBtn.innerHTML = "Secondes : " + (state.showSeconds ? "ON" : "OFF");
+    updateClock();
+    window.setTimeout(fitClock, 0);
+  };
+
+  on($("#fontStyle"), "change", function (event) {
+    state.fontStyle = event.target.value;
+    localStorage.setItem("fontStyle", state.fontStyle);
+    applyClockStyle();
+  });
+  on($("#clockSize"), "change", function (event) {
+    state.clockSize = event.target.value;
+    localStorage.setItem("clockSize", state.clockSize);
+    fitClock();
+  });
+
+  var revealEnabled = true;
+  on(hideBtn, "click", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    revealEnabled = false;
+    state.uiHidden = true;
+    addClass(document.body, "hiddenUI");
+    window.setTimeout(function () { revealEnabled = true; }, 450);
+  });
+  on(document.body, "click", function () {
+    if (state.uiHidden && revealEnabled && !hasClass(alarmOverlay, "open")) {
+      state.uiHidden = false;
+      removeClass(document.body, "hiddenUI");
+    }
+  });
+
+  var fullscreenBusy = false;
+  on(fullscreenBtn, "click", function (event) {
+    var action;
+    event.preventDefault();
+    event.stopPropagation();
+    if (fullscreenBusy) return;
+    fullscreenBusy = true;
+    fullscreenBtn.disabled = true;
+    try {
+      if (!(document.fullscreenElement || document.webkitFullscreenElement)) {
+        action = document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen;
+        if (action) action.call(document.documentElement);
+      } else {
+        action = document.exitFullscreen || document.webkitExitFullscreen;
+        if (action) action.call(document);
+      }
+    } catch (ignore) {}
+    window.setTimeout(function () {
+      fullscreenBusy = false;
+      fullscreenBtn.disabled = false;
+    }, 1200);
+  });
+
+  function requestWakeLock() {
+    var request;
+    if (!navigator.wakeLock || !navigator.wakeLock.request) {
+      wakeState.innerHTML = "Wake Lock non disponible sur ce navigateur.";
+      return;
+    }
+    try {
+      request = navigator.wakeLock.request("screen");
+      if (request && request.then) {
+        request.then(function (wakeLock) {
+          state.wakeLock = wakeLock;
+          wakeState.innerHTML = "Écran maintenu allumé.";
+        }, function () {
+          wakeState.innerHTML = "Impossible de maintenir l’écran allumé automatiquement.";
+        });
+      }
+    } catch (ignore) {
+      wakeState.innerHTML = "Impossible de maintenir l’écran allumé automatiquement.";
+    }
+  }
+
+  on(document, "visibilitychange", function () {
+    if (document.visibilityState === "visible") requestWakeLock();
+  });
+  $("#alarmBtn").onclick = function () { addClass(alarmPanel, "open"); };
+  $("#closeAlarmBtn").onclick = function () { removeClass(alarmPanel, "open"); };
+  on(alarmPanel, "click", function (event) {
+    if (event.target === alarmPanel) removeClass(alarmPanel, "open");
+  });
+
+  function saveAlarms() { localStorage.setItem("alarms", JSON.stringify(state.alarms)); }
+  function soundName(sound) {
+    var names = { classic: "Bip classique", double: "Double bip", gentle: "Réveil doux", rapid: "Sonnerie rapide", strong: "Alerte forte", chime: "Carillon" };
+    return names[sound] || names.classic;
+  }
+  function escapeHtml(value) {
+    var chars = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+    return String(value).replace(/[&<>"']/g, function (character) { return chars[character]; });
+  }
+  function findAlarm(id) {
+    var i;
+    for (i = 0; i < state.alarms.length; i += 1) if (state.alarms[i].id === id) return state.alarms[i];
+    return null;
+  }
+  function renderAlarms() {
+    var copy;
+    var i;
+    if (!state.alarms.length) {
+      alarmList.innerHTML = '<p style="color:#888">Aucune alarme programmée.</p>';
+      return;
+    }
+    copy = state.alarms.slice(0);
+    copy.sort(function (a, b) { return a.time.localeCompare(b.time); });
+    alarmList.innerHTML = "";
+    for (i = 0; i < copy.length; i += 1) {
+      var alarm = copy[i];
+      var item = document.createElement("div");
+      item.className = "alarmItem";
+      item.innerHTML = '<div class="alarmMain"><div><div class="alarmTime">' + escapeHtml(alarm.time) + '</div><div class="alarmLabel">' + escapeHtml(alarm.label || "Alarme") + (alarm.repeatDaily ? " • Tous les jours" : "") + " • " + soundName(alarm.sound || "classic") + '</div></div><label><input type="checkbox" ' + (alarm.enabled ? "checked" : "") + ' data-toggle="' + escapeHtml(alarm.id) + '"> Active</label></div><div class="alarmButtons"><button class="smallBtn danger" data-delete="' + escapeHtml(alarm.id) + '">Supprimer</button></div>';
+      alarmList.appendChild(item);
+    }
+  }
+
+  on(alarmList, "change", function (event) {
+    var id = event.target.getAttribute("data-toggle");
+    var alarm;
+    if (!id) return;
+    alarm = findAlarm(id);
+    if (alarm) { alarm.enabled = event.target.checked; saveAlarms(); }
+  });
+  on(alarmList, "click", function (event) {
+    var id = event.target.getAttribute("data-delete");
+    var kept = [];
+    var i;
+    if (!id) return;
+    for (i = 0; i < state.alarms.length; i += 1) if (state.alarms[i].id !== id) kept.push(state.alarms[i]);
+    state.alarms = kept;
+    saveAlarms();
+    renderAlarms();
+  });
+
+  function enableAudio() {
+    try {
+      if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (state.audioCtx.state === "suspended" && state.audioCtx.resume) state.audioCtx.resume();
+    } catch (ignore) {}
+  }
+  function beepTone(freq, duration, volume, type, delay) {
+    var start;
+    var oscillator;
+    var gain;
+    freq = typeof freq === "number" ? freq : 880;
+    duration = typeof duration === "number" ? duration : 0.45;
+    volume = typeof volume === "number" ? volume : 0.28;
+    type = type || "sine";
+    delay = typeof delay === "number" ? delay : 0;
+    if (!state.audioCtx) return;
+    start = state.audioCtx.currentTime + delay;
+    oscillator = state.audioCtx.createOscillator();
+    gain = state.audioCtx.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(freq, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(gain);
+    gain.connect(state.audioCtx.destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.05);
+  }
+  function soundPattern(sound) {
+    if (sound === "double") { beepTone(900, 0.22, 0.28, "sine", 0); beepTone(900, 0.22, 0.28, "sine", 0.32); return 950; }
+    if (sound === "gentle") { beepTone(520, 0.55, 0.18, "sine", 0); beepTone(660, 0.55, 0.16, "sine", 0.6); return 1600; }
+    if (sound === "rapid") { beepTone(1000, 0.12, 0.24, "square", 0); beepTone(1000, 0.12, 0.24, "square", 0.18); beepTone(1000, 0.12, 0.24, "square", 0.36); return 900; }
+    if (sound === "strong") { beepTone(880, 0.38, 0.36, "square", 0); beepTone(1175, 0.38, 0.34, "square", 0.45); return 1050; }
+    if (sound === "chime") { beepTone(523.25, 0.45, 0.18, "sine", 0); beepTone(659.25, 0.45, 0.18, "sine", 0.28); beepTone(783.99, 0.65, 0.20, "sine", 0.56); return 1800; }
+    beepTone(880, 0.65, 0.32, "sine", 0); return 1100;
+  }
+  function stopTone() {
+    window.clearInterval(state.toneTimer);
+    state.toneTimer = null;
+    if (navigator.vibrate) navigator.vibrate(0);
+  }
+  function playTone(sound) {
+    var chosen = sound || "classic";
+    var intervals = { double: 950, gentle: 1600, rapid: 900, strong: 1050, chime: 1800, classic: 1100 };
+    function play() {
+      if (!hasClass(alarmOverlay, "open") && !state.previewingSound) return;
+      soundPattern(chosen);
+    }
+    stopTone();
+    enableAudio();
+    if (!state.audioCtx) return;
+    play();
+    if (!state.previewingSound) {
+      state.toneTimer = window.setInterval(play, intervals[chosen] || 1100);
+      if (navigator.vibrate) navigator.vibrate([700, 300, 700, 300, 700]);
+    }
+  }
+
+  $("#testSoundBtn").onclick = function () {
+    enableAudio();
+    stopTone();
+    state.previewingSound = true;
+    playTone($("#alarmSound").value);
+    window.setTimeout(function () { state.previewingSound = false; stopTone(); }, 2200);
+  };
+  $("#addAlarmBtn").onclick = function () {
+    var time = $("#alarmTime").value;
+    if (!time) { window.alert("Choisis une heure."); return; }
+    enableAudio();
+    state.alarms.push({ id: newId(), time: time, label: $("#alarmLabel").value.replace(/^\s+|\s+$/g, ""), sound: $("#alarmSound").value, repeatDaily: $("#repeatDaily").checked, enabled: true, lastTriggeredDate: null });
+    saveAlarms();
+    renderAlarms();
+    $("#alarmLabel").value = "";
+  };
+
+  function fireAlarm(alarm) {
+    state.activeAlarm = alarm;
+    ringTime.innerHTML = alarm.time;
+    ringLabel.innerHTML = escapeHtml(alarm.label || "Alarme");
+    addClass(alarmOverlay, "open");
+    removeClass(alarmPanel, "open");
+    playTone(alarm.sound || "classic");
+  }
+  $("#stopBtn").onclick = function () {
+    var alarm = state.activeAlarm;
+    stopTone();
+    removeClass(alarmOverlay, "open");
+    if (alarm && !alarm.repeatDaily) alarm.enabled = false;
+    state.activeAlarm = null;
+    saveAlarms();
+    renderAlarms();
+  };
+  $("#snoozeBtn").onclick = function () {
+    var original = state.activeAlarm;
+    var date = new Date(new Date().getTime() + 5 * 60 * 1000);
+    var time = ("0" + date.getHours()).slice(-2) + ":" + ("0" + date.getMinutes()).slice(-2);
+    stopTone();
+    removeClass(alarmOverlay, "open");
+    state.alarms.push({ id: newId(), time: time, label: ((original && original.label) || "Alarme") + " (rappel)", sound: (original && original.sound) || "classic", repeatDaily: false, enabled: true, lastTriggeredDate: null, snooze: true });
+    state.activeAlarm = null;
+    saveAlarms();
+    renderAlarms();
+  };
+  function checkAlarms() {
+    var now = new Date();
+    var hhmm = ("0" + now.getHours()).slice(-2) + ":" + ("0" + now.getMinutes()).slice(-2);
+    var today = now.getFullYear() + "-" + ("0" + (now.getMonth() + 1)).slice(-2) + "-" + ("0" + now.getDate()).slice(-2);
+    var i;
+    for (i = 0; i < state.alarms.length; i += 1) {
+      var alarm = state.alarms[i];
+      if (alarm.enabled && alarm.time === hhmm && alarm.lastTriggeredDate !== today) {
+        alarm.lastTriggeredDate = today;
+        saveAlarms();
+        fireAlarm(alarm);
+      }
+    }
+  }
+
+  on(window, "resize", fitClock);
+  on(window, "orientationchange", function () { window.setTimeout(fitClock, 150); });
+  on(window, "load", function () { window.setTimeout(fitClock, 100); window.setTimeout(fitClock, 600); });
+  function firstInteraction() {
+    enableAudio();
+    document.removeEventListener("touchstart", firstInteraction, false);
+    document.removeEventListener("mousedown", firstInteraction, false);
+  }
+  on(document, "touchstart", firstInteraction);
+  on(document, "mousedown", firstInteraction);
+
+  secondsBtn.innerHTML = "Secondes : " + (state.showSeconds ? "ON" : "OFF");
+  renderPalette();
+  renderAlarms();
+  updateClock();
+  applyClockStyle();
+  fitClock();
+  requestWakeLock();
+  window.setInterval(updateClock, 250);
+  window.setInterval(checkAlarms, 1000);
+
+  if (navigator.serviceWorker) {
+    on(window, "load", function () {
+      try { navigator.serviceWorker.register("sw.js"); } catch (ignore) {}
+    });
+  }
+}());
 </script>
 </body>
 </html>

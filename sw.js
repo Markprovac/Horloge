@@ -1,8 +1,9 @@
-const CACHE = "horloge-pwa-v2.0";
+const CACHE = "horloge-pwa-v2.1";
 const STATIC_ASSETS = [
   "./manifest.json",
   "./icon-192.svg",
-  "./icon-512.svg"
+  "./icon-512.svg",
+  "./nosleep.mp4"
 ];
 
 self.addEventListener("install", event => {

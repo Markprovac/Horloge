@@ -70,6 +70,15 @@
     #clock .blinkColon.off{
       opacity:0;
     }
+    #noSleepVideo{
+      position:fixed;
+      width:1px;
+      height:1px;
+      left:0;
+      bottom:0;
+      opacity:.01;
+      pointer-events:none;
+    }
     #topbar{
       position:fixed;
       top:var(--safe-top);
@@ -247,6 +256,9 @@
 </head>
 <body>
   <div id="clockWrap"><div id="clock">00:00:00</div></div>
+  <video id="noSleepVideo" muted loop playsinline webkit-playsinline preload="auto" aria-hidden="true">
+    <source src="nosleep.mp4" type="video/mp4">
+  </video>
 
   <div id="topbar">
     <button class="roundBtn" id="alarmBtn" aria-label="Alarmes">⏰ Alarmes</button>
@@ -274,7 +286,7 @@
       <button class="actionBtn" id="hideBtn">Masquer les commandes</button>
     </div>
     <div id="wakeState">Écran maintenu allumé si le navigateur l’autorise.</div>
-    <div id="appVersion" style="text-align:center;color:#666;font-size:11px">v2.0</div>
+    <div id="appVersion" style="text-align:center;color:#666;font-size:11px">v2.1</div>
   </div>
 
   <div class="panel" id="alarmPanel">
@@ -912,20 +924,24 @@
   });
 
   var revealEnabled = true;
-  on(hideBtn, "click", function (event) {
+  function hideControls(event) {
     event.preventDefault();
     event.stopPropagation();
     revealEnabled = false;
     state.uiHidden = true;
     addClass(document.body, "hiddenUI");
     window.setTimeout(function () { revealEnabled = true; }, 450);
-  });
-  on(document.body, "click", function () {
+  }
+  function revealControls() {
     if (state.uiHidden && revealEnabled && !hasClass(alarmOverlay, "open")) {
       state.uiHidden = false;
       removeClass(document.body, "hiddenUI");
     }
-  });
+  }
+  on(hideBtn, "touchend", hideControls);
+  on(hideBtn, "click", hideControls);
+  on(document.body, "touchend", revealControls);
+  on(document.body, "click", revealControls);
 
   var fullscreenBusy = false;
   on(fullscreenBtn, "click", function (event) {
@@ -968,6 +984,29 @@
       }
     } catch (ignore) {
       wakeState.innerHTML = "Impossible de maintenir l’écran allumé automatiquement.";
+    }
+  }
+
+  var noSleepStarted = false;
+  function startNoSleepFallback() {
+    var video = $("#noSleepVideo");
+    var result;
+    if (noSleepStarted || !video) return;
+    try {
+      video.muted = true;
+      video.volume = 0;
+      result = video.play();
+      noSleepStarted = true;
+      wakeState.innerHTML = "Écran maintenu allumé (mode compatible iPad).";
+      if (result && result.catch) {
+        result.catch(function () {
+          noSleepStarted = false;
+          wakeState.innerHTML = "Touchez encore l’écran pour activer le maintien allumé.";
+        });
+      }
+    } catch (ignore) {
+      noSleepStarted = false;
+      wakeState.innerHTML = "Touchez encore l’écran pour activer le maintien allumé.";
     }
   }
 
@@ -1155,6 +1194,8 @@
   on(window, "load", function () { window.setTimeout(fitClock, 100); window.setTimeout(fitClock, 600); });
   function firstInteraction() {
     enableAudio();
+    if (!navigator.wakeLock || !navigator.wakeLock.request) startNoSleepFallback();
+    else requestWakeLock();
     document.removeEventListener("touchstart", firstInteraction, false);
     document.removeEventListener("mousedown", firstInteraction, false);
   }
